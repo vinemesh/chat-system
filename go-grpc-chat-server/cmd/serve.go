@@ -8,7 +8,7 @@ import (
 	"net"
 
 	"github.com/spf13/cobra"
-	"github.com/vinemesh/nest/internal/messages"
+	"github.com/vinemesh/go-grpc-chat-server/internal/chat"
 	"google.golang.org/grpc"
 )
 
@@ -19,7 +19,7 @@ var serveCmd = &cobra.Command{
 	Long:  `Inicia o servidor gRPC que lida com mensagens.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		grpcServer := grpc.NewServer()
-		messages.RegisterMessageServiceServer(grpcServer, &messages.Server{})
+		chat.RegisterChatServiceServer(grpcServer, &chat.Server{})
 
 		listener, err := net.Listen("tcp", ":50051")
 		if err != nil {
