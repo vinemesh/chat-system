@@ -18,15 +18,14 @@ type Server struct {
 	streams sync.Map
 	// A map to keep track of group subscriptions.
 	groupSubscriptions sync.Map // map[uint64][]uint64 : groupID -> []playerIDs
+	//groupSubscriptions map[uint64]map[uint64]struct{} // groupID -> map[playerID]struct{}
 }
 
 // Subscribe adds a player to a chat group.
 func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*SubscriptionResponse, error) {
 	playerID := req.Player.Id
-	log.Printf("player %d", playerID)
 	groupID := req.Group.Id
-	log.Printf("group %d", groupID)
-	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
+	log.Printf("Received subscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
 		return nil, errors.New("invalid player or group ID")
@@ -44,9 +43,7 @@ func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*Subs
 // Unsubscribe removes a player from a chat group.
 func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*UnsubscriptionResponse, error) {
 	playerID := req.Player.Id
-	log.Printf("player %d", playerID)
 	groupID := req.Group.Id
-	log.Printf("group %d", groupID)
 	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
@@ -94,22 +91,28 @@ func (s *Server) StreamMessages(stream ChatService_StreamMessagesServer) error {
 			log.Printf("Error receiving from stream: %v", err)
 			return err
 		}
+		go s.handleMessage(stream, in)
+	}
+}
 
-		switch msg := in.MessageType.(type) {
-		case *MessageStream_Message:
-			// Handle incoming chat message
-			log.Printf("Received message from player %d in group %d", msg.Message.Player.Id, msg.Message.Group.Id)
-			s.broadcastMessageToGroup(msg.Message)
+// handleMessage handles the incoming message concurrently.
+func (s *Server) handleMessage(stream ChatService_StreamMessagesServer, in *MessageStream) error {
+	switch msg := in.MessageType.(type) {
+	case *MessageStream_Message:
+		// Handle incoming chat message
+		log.Printf("Received message from player %d in group %d", msg.Message.Player.Id, msg.Message.Group.Id)
+		s.broadcastMessageToGroup(msg.Message)
+		return nil
 
-		case *MessageStream_StreamRequest:
-			playerId := msg.StreamRequest.Player.Id
-			log.Printf("Received stream request from player %d", playerId)
-			// Handle stream request, store stream for later use
-			s.streams.Store(playerId, stream)
+	case *MessageStream_StreamRequest:
+		playerId := msg.StreamRequest.Player.Id
+		log.Printf("Received stream request from player %d", playerId)
+		// Handle stream request, store stream for later use
+		s.streams.Store(playerId, stream)
+		return nil
 
-		default:
-			return status.Errorf(codes.InvalidArgument, "Unknown message type")
-		}
+	default:
+		return status.Errorf(codes.InvalidArgument, "Unknown message type")
 	}
 }
 
