@@ -17,7 +17,8 @@
                 "ms-azuretools.vscode-docker",
                 "eamodio.gitlens",
                 "oderwat.indent-rainbow",
-                "VisualStudioExptTeam.vscodeintellicode"
+                "VisualStudioExptTeam.vscodeintellicode",
+                "zxh404.vscode-proto3"
             ]
         }
     },
