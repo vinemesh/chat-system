@@ -23,7 +23,10 @@ type Server struct {
 // Subscribe adds a player to a chat group.
 func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*SubscriptionResponse, error) {
 	playerID := req.Player.Id
+	log.Printf("player %d", playerID)
 	groupID := req.Group.Id
+	log.Printf("group %d", groupID)
+	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
 		return nil, errors.New("invalid player or group ID")
@@ -41,7 +44,10 @@ func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*Subs
 // Unsubscribe removes a player from a chat group.
 func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*UnsubscriptionResponse, error) {
 	playerID := req.Player.Id
+	log.Printf("player %d", playerID)
 	groupID := req.Group.Id
+	log.Printf("group %d", groupID)
+	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
 		return nil, errors.New("invalid player or group ID")
@@ -56,7 +62,7 @@ func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*
 }
 
 // subscribePlayerToGroup adds a player to a group's subscription list.
-func (s *Server) subscribePlayerToGroup(playerID, groupID uint64) {
+func (s *Server) subscribePlayerToGroup(playerID uint64, groupID uint64) {
 	var subscribers []uint64
 	if existing, ok := s.groupSubscriptions.Load(groupID); ok {
 		subscribers = existing.([]uint64)
@@ -66,7 +72,7 @@ func (s *Server) subscribePlayerToGroup(playerID, groupID uint64) {
 }
 
 // unsubscribePlayerFromGroup removes a player from a group's subscription list.
-func (s *Server) unsubscribePlayerFromGroup(playerID, groupID uint64) {
+func (s *Server) unsubscribePlayerFromGroup(playerID uint64, groupID uint64) {
 	existing, ok := s.groupSubscriptions.Load(groupID)
 	if !ok {
 		return // Group not found or no subscribers
@@ -96,9 +102,10 @@ func (s *Server) StreamMessages(stream ChatService_StreamMessagesServer) error {
 			s.broadcastMessageToGroup(msg.Message)
 
 		case *MessageStream_StreamRequest:
+			playerId := msg.StreamRequest.Player.Id
+			log.Printf("Received stream request from player %d", playerId)
 			// Handle stream request, store stream for later use
-			playerID := msg.StreamRequest.Player.Id
-			s.streams.Store(playerID, stream)
+			s.streams.Store(playerId, stream)
 
 		default:
 			return status.Errorf(codes.InvalidArgument, "Unknown message type")
