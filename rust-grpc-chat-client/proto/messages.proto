@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package messages;
+
+message PlayerMessage {
+    string player_id = 1;
+    string content = 2;
+}
+
+message ResponseMessage {
+    string message = 1;
+}
+
+service MessageService {
+    rpc SendMessage(PlayerMessage) returns (ResponseMessage);
+    rpc StreamMessages(stream PlayerMessage) returns (stream ResponseMessage);
+}
