@@ -30,7 +30,7 @@ message ResponseStatus {
 // Message represents a chat message.
 message Message {
   UUID id = 1; // Unique identifier of the message.
-  Group groupId = 2; // Unique identifier of the group.
+  Group group = 2; // Unique identifier of the group.
   Player player = 3; // Player who sent the message.
   string content = 4; // The content of the message.
   google.protobuf.Timestamp timestamp = 5; // Timestamp of the message.

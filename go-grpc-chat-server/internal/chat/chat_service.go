@@ -1,3 +1,4 @@
+//go:generate protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative chat.proto
 package chat
 
 import (
@@ -24,16 +25,13 @@ func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*Subs
 	playerID := req.Player.Id
 	groupID := req.Group.Id
 
-	// Check if the player and group IDs are valid.
 	if playerID == 0 || groupID == 0 {
 		return nil, errors.New("invalid player or group ID")
 	}
 
-	// Subscribe the player to the group.
 	s.subscribePlayerToGroup(playerID, groupID)
 	log.Printf("Player %d subscribed to group %d", playerID, groupID)
 
-	// Return a successful response.
 	return &SubscriptionResponse{
 		Status: &ResponseStatus{Code: 200, Message: "Subscribed successfully"},
 		Group:  req.Group,
@@ -45,16 +43,13 @@ func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*
 	playerID := req.Player.Id
 	groupID := req.Group.Id
 
-	// Check if the player and group IDs are valid.
 	if playerID == 0 || groupID == 0 {
 		return nil, errors.New("invalid player or group ID")
 	}
 
-	// Unsubscribe the player from the group.
 	s.unsubscribePlayerFromGroup(playerID, groupID)
 	log.Printf("Player %d unsubscribed from group %d", playerID, groupID)
 
-	// Return a successful response.
 	return &UnsubscriptionResponse{
 		Status: &ResponseStatus{Code: 200, Message: "Unsubscribed successfully"},
 	}, nil
@@ -62,28 +57,27 @@ func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*
 
 // subscribePlayerToGroup adds a player to a group's subscription list.
 func (s *Server) subscribePlayerToGroup(playerID, groupID uint64) {
-	// Lock the groupSubscriptions map for safe concurrent access.
-	s.groupSubscriptions.Store(groupID, append(s.getSubscribedPlayers(groupID), playerID))
+	var subscribers []uint64
+	if existing, ok := s.groupSubscriptions.Load(groupID); ok {
+		subscribers = existing.([]uint64)
+	}
+	subscribers = append(subscribers, playerID)
+	s.groupSubscriptions.Store(groupID, subscribers)
 }
 
 // unsubscribePlayerFromGroup removes a player from a group's subscription list.
 func (s *Server) unsubscribePlayerFromGroup(playerID, groupID uint64) {
-	subscribedPlayers := s.getSubscribedPlayers(groupID)
-	for i, id := range subscribedPlayers {
+	existing, ok := s.groupSubscriptions.Load(groupID)
+	if !ok {
+		return // Group not found or no subscribers
+	}
+	subscribers := existing.([]uint64)
+	for i, id := range subscribers {
 		if id == playerID {
-			s.groupSubscriptions.Store(groupID, append(subscribedPlayers[:i], subscribedPlayers[i+1:]...))
+			s.groupSubscriptions.Store(groupID, append(subscribers[:i], subscribers[i+1:]...))
 			break
 		}
 	}
-}
-
-// getSubscribedPlayers returns a slice of player IDs subscribed to a group.
-func (s *Server) getSubscribedPlayers(groupID uint64) []uint64 {
-	players, ok := s.groupSubscriptions.Load(groupID)
-	if !ok {
-		return []uint64{}
-	}
-	return players.([]uint64)
 }
 
 // StreamMessages handles bidirectional streaming for chat messages.
@@ -98,7 +92,7 @@ func (s *Server) StreamMessages(stream ChatService_StreamMessagesServer) error {
 		switch msg := in.MessageType.(type) {
 		case *MessageStream_Message:
 			// Handle incoming chat message
-			log.Printf("Received message from player %d in group %d", msg.Message.Player.Id, msg.Message.GroupId)
+			log.Printf("Received message from player %d in group %d", msg.Message.Player.Id, msg.Message.Group.Id)
 			s.broadcastMessageToGroup(msg.Message)
 
 		case *MessageStream_StreamRequest:
@@ -113,9 +107,8 @@ func (s *Server) StreamMessages(stream ChatService_StreamMessagesServer) error {
 }
 
 // broadcastMessageToGroup sends a given message to all subscribed players of a group.
-// broadcastMessageToGroup sends a given message to all subscribed players of a group.
-func (s *Server) broadcastMessageToGroup(message *Message, groupID uint64) {
-	// Retrieve subscribed players for the group
+func (s *Server) broadcastMessageToGroup(message *Message) {
+	groupID := message.Group.Id
 	players, ok := s.groupSubscriptions.Load(groupID)
 	if !ok {
 		log.Printf("No players subscribed to group %d", groupID)
