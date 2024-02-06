@@ -1,0 +1,92 @@
+syntax = "proto3";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/vinemesh/go-grpc-chat-server/internal/chat";
+package chat;
+
+// Represents a UUID
+message UUID {
+  string id = 1; // Expected to be a UUID in string format.
+}
+
+// Player represents a player in the chat.
+message Player {
+  uint64 id = 1; // Unique identifier of the player.
+  string name = 2; // Name of the player.
+}
+
+// Group represents a group of players in the chat.
+message Group {
+  uint64 id = 1; // Unique identifier of the group.
+  string name = 2; // Name of the group.
+}
+
+// Define a common response status
+message ResponseStatus {
+  int32 code = 1; // Custom status code
+  string message = 2; // Description or error message
+}
+
+// Message represents a chat message.
+message Message {
+  UUID id = 1; // Unique identifier of the message.
+  Group group = 2; // Unique identifier of the group.
+  Player player = 3; // Player who sent the message.
+  string content = 4; // The content of the message.
+  google.protobuf.Timestamp timestamp = 5; // Timestamp of the message.
+}
+
+// Subscription request to a group.
+message SubscriptionRequest {
+  Player player = 1; // Player subscribing.
+  Group group = 2; // Group to subscribe to. If not passed, a new group will be created.
+  google.protobuf.Timestamp timestamp = 3; // Timestamp of the request.
+}
+
+// Subscription response to a SubscriptionRequest.
+message SubscriptionResponse {
+  ResponseStatus status = 1; // Operation status.
+  Group group = 2; // Group subscribed to.
+}
+
+// Unsubscription request from a group.
+message UnsubscriptionRequest {
+  Player player = 1; // Player unsubscribing.
+  Group group = 2; // Group to unsubscribe to. If not passed, will be unsubscribed from all groups.
+  google.protobuf.Timestamp timestamp = 3; // Timestamp of the request.
+}
+
+// Unsubscription response to an UnsubscriptionRequest.
+message UnsubscriptionResponse {
+  ResponseStatus status = 1; // Operation status.
+}
+
+// Response to a SendMessage.
+message MessageResponse {
+  ResponseStatus status = 1; // Operation status.
+}
+
+// ChatService defines the possible operations.
+service ChatService {
+  // Subscribes a player to a group.
+  rpc Subscribe (SubscriptionRequest) returns (SubscriptionResponse) {}
+
+  // Unsubscribes a player from a group.
+  rpc Unsubscribe (UnsubscriptionRequest) returns (UnsubscriptionResponse) {}
+
+  // Message stream for a subscribed player.
+  rpc StreamMessages (stream MessageStream) returns (stream MessageStream) {}
+}
+
+// MessageStream represents a chat message or a stream request.
+message MessageStream {
+  oneof message_type {
+    Message message = 1;
+    StreamRequest stream_request = 2;
+  }
+}
+
+// Request for streaming messages, identifying the player.
+message StreamRequest {
+  Player player = 1; // Player's identifier 
+}
