@@ -4,13 +4,13 @@ go 1.20
 
 require (
 	github.com/confluentinc/confluent-kafka-go/v2 v2.3.0
+	github.com/golang/protobuf v1.5.3
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 	google.golang.org/protobuf v1.31.0
 )
 
 require (
-	github.com/golang/protobuf v1.5.3 // indirect
 	golang.org/x/net v0.19.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231120223509-83a465c0220f // indirect
 )

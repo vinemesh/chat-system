@@ -9,7 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vinemesh/go-grpc-chat-server/internal/chat"
+	"github.com/vinemesh/go-grpc-chat-server/internal/kafka"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 // serveCmd represents the serve command
@@ -18,8 +20,17 @@ var serveCmd = &cobra.Command{
 	Short: "Inicia o servidor gRPC",
 	Long:  `Inicia o servidor gRPC que lida com mensagens.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		producer, err := kafka.NewProducer("localhost:9092")
+		if err != nil {
+			log.Fatalf("Erro ao iniciar o produtor do kafka")
+		}
+		log.Printf("Produtor do kafka iniciado na porta :9092")
+
 		grpcServer := grpc.NewServer()
 		chat.RegisterChatServiceServer(grpcServer, &chat.Server{})
+
+		// Register reflection service on gRPC server.
+		reflection.Register(grpcServer)
 
 		listener, err := net.Listen("tcp", ":50051")
 		if err != nil {
