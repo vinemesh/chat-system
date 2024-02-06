@@ -3,12 +3,12 @@ package chat
 
 import (
 	context "context"
-	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	sync "sync"
 
-	"github.com/vinemesh/go-grpc-chat-server/internal/kafka"
+	kp "github.com/vinemesh/go-grpc-chat-server/internal/kafka"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
 )
@@ -16,7 +16,8 @@ import (
 // Server represents the gRPC server for chat service.
 type Server struct {
 	UnimplementedChatServiceServer
-	Producer *kafka.Producer
+	Producer *kp.Producer
+	ErrChan  chan error
 	// A map to store client streams with a Mutex for synchronization.
 	streams sync.Map
 }
@@ -28,16 +29,19 @@ func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*Subs
 	log.Printf("Received subscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
-		return nil, status.Errorf(codes.NotFound, "invalid player or group ID")
+		err := status.Errorf(codes.NotFound, "invalid player or group ID")
+		s.ErrChan <- err
+		return nil, err
 	}
 
 	err := s.Producer.ProduceMessage(
-		strconv.FormatUint(groupID, 10),
+		fmt.Sprintf("chat_events_%d", groupID),
 		strconv.FormatUint(playerID, 10),
 		"subscribe",
 	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "error producing kafka message")
+		s.ErrChan <- err
+		return nil, status.Errorf(codes.Internal, "error producing kafka message: %v", err)
 	}
 	log.Printf("Player %d subscribed to group %d", playerID, groupID)
 
@@ -54,16 +58,19 @@ func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*
 	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
-		return nil, status.Errorf(codes.NotFound, "invalid player or group ID")
+		err := status.Errorf(codes.NotFound, "invalid player or group ID")
+		s.ErrChan <- err
+		return nil, err
 	}
 
 	err := s.Producer.ProduceMessage(
-		strconv.FormatUint(groupID, 10),
+		fmt.Sprintf("chat_events_%d", groupID),
 		strconv.FormatUint(playerID, 10),
 		"unsubscribe",
 	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "error producing kafka message")
+		s.ErrChan <- err
+		return nil, status.Errorf(codes.Internal, "error producing kafka message: %v", err)
 	}
 	log.Printf("Player %d unsubscribed from group %d", playerID, groupID)
 
@@ -77,8 +84,8 @@ func (s *Server) StreamMessages(stream ChatService_StreamMessagesServer) error {
 	for {
 		in, err := stream.Recv()
 		if err != nil {
-			log.Printf("Error receiving from stream: %v", err)
-			return err
+			s.ErrChan <- err
+			return status.Errorf(codes.DataLoss, "Error receiving from stream: %v", err)
 		}
 		go s.handleMessage(stream, in)
 	}
@@ -95,16 +102,19 @@ func (s *Server) handleMessage(stream ChatService_StreamMessagesServer, in *Mess
 		log.Printf("Group %d | Player %d: %s", groupID, playerID, content)
 
 		if playerID == 0 || groupID == 0 {
-			return errors.New("invalid player or group ID in chat message")
+			err := status.Errorf(codes.NotFound, "invalid player or group ID in chat message")
+			s.ErrChan <- err
+			return err
 		}
 
 		err := s.Producer.ProduceMessage(
-			strconv.FormatUint(groupID, 10),
+			fmt.Sprintf("chat_messages_%d", groupID),
 			strconv.FormatUint(playerID, 10),
 			content,
 		)
 		if err != nil {
-			return status.Errorf(codes.Internal, "error producing kafka message")
+			s.ErrChan <- err
+			return status.Errorf(codes.Internal, "error producing kafka message: %v", err)
 		}
 		return nil
 
@@ -117,7 +127,9 @@ func (s *Server) handleMessage(stream ChatService_StreamMessagesServer, in *Mess
 		return nil
 
 	default:
-		return status.Errorf(codes.InvalidArgument, "Unknown message type")
+		err := status.Errorf(codes.InvalidArgument, "Unknown message type")
+		s.ErrChan <- err
+		return err
 	}
 }
 

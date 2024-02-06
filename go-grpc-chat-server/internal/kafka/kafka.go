@@ -6,15 +6,18 @@ import (
 )
 
 type Producer struct {
-	producer *kafka.Producer
+	Producer *kafka.Producer
 }
 
 func NewProducer(brokers string) (*Producer, error) {
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": brokers})
+	p, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": brokers,
+		"acks":              "all",
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &Producer{producer: p}, nil
+	return &Producer{Producer: p}, nil
 }
 
 // ProduceMessage produces a message for the given topic with the specified key and value.
@@ -27,7 +30,7 @@ func NewProducer(brokers string) (*Producer, error) {
 //
 // Return type: error
 func (p *Producer) ProduceMessage(topic, key, value string) error {
-	return p.producer.Produce(&kafka.Message{
+	return p.Producer.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
 		Key:            []byte(key),
 		Value:          []byte(value),
