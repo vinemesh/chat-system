@@ -5,20 +5,20 @@ import (
 	context "context"
 	"errors"
 	"log"
-	"sync"
+	"strconv"
+	sync "sync"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/vinemesh/go-grpc-chat-server/internal/kafka"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 // Server represents the gRPC server for chat service.
 type Server struct {
 	UnimplementedChatServiceServer
+	Producer *kafka.Producer
 	// A map to store client streams with a Mutex for synchronization.
 	streams sync.Map
-	// A map to keep track of group subscriptions.
-	groupSubscriptions sync.Map // map[uint64][]uint64 : groupID -> []playerIDs
-	//groupSubscriptions map[uint64]map[uint64]struct{} // groupID -> map[playerID]struct{}
 }
 
 // Subscribe adds a player to a chat group.
@@ -28,10 +28,17 @@ func (s *Server) Subscribe(ctx context.Context, req *SubscriptionRequest) (*Subs
 	log.Printf("Received subscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
-		return nil, errors.New("invalid player or group ID")
+		return nil, status.Errorf(codes.NotFound, "invalid player or group ID")
 	}
 
-	s.subscribePlayerToGroup(playerID, groupID)
+	err := s.Producer.ProduceMessage(
+		strconv.FormatUint(groupID, 10),
+		strconv.FormatUint(playerID, 10),
+		"subscribe",
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "error producing kafka message")
+	}
 	log.Printf("Player %d subscribed to group %d", playerID, groupID)
 
 	return &SubscriptionResponse{
@@ -47,40 +54,22 @@ func (s *Server) Unsubscribe(ctx context.Context, req *UnsubscriptionRequest) (*
 	log.Printf("Received unsubscription request from player %d to group %d", playerID, groupID)
 
 	if playerID == 0 || groupID == 0 {
-		return nil, errors.New("invalid player or group ID")
+		return nil, status.Errorf(codes.NotFound, "invalid player or group ID")
 	}
 
-	s.unsubscribePlayerFromGroup(playerID, groupID)
+	err := s.Producer.ProduceMessage(
+		strconv.FormatUint(groupID, 10),
+		strconv.FormatUint(playerID, 10),
+		"unsubscribe",
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "error producing kafka message")
+	}
 	log.Printf("Player %d unsubscribed from group %d", playerID, groupID)
 
 	return &UnsubscriptionResponse{
 		Status: &ResponseStatus{Code: 200, Message: "Unsubscribed successfully"},
 	}, nil
-}
-
-// subscribePlayerToGroup adds a player to a group's subscription list.
-func (s *Server) subscribePlayerToGroup(playerID uint64, groupID uint64) {
-	var subscribers []uint64
-	if existing, ok := s.groupSubscriptions.Load(groupID); ok {
-		subscribers = existing.([]uint64)
-	}
-	subscribers = append(subscribers, playerID)
-	s.groupSubscriptions.Store(groupID, subscribers)
-}
-
-// unsubscribePlayerFromGroup removes a player from a group's subscription list.
-func (s *Server) unsubscribePlayerFromGroup(playerID uint64, groupID uint64) {
-	existing, ok := s.groupSubscriptions.Load(groupID)
-	if !ok {
-		return // Group not found or no subscribers
-	}
-	subscribers := existing.([]uint64)
-	for i, id := range subscribers {
-		if id == playerID {
-			s.groupSubscriptions.Store(groupID, append(subscribers[:i], subscribers[i+1:]...))
-			break
-		}
-	}
 }
 
 // StreamMessages handles bidirectional streaming for chat messages.
@@ -100,13 +89,29 @@ func (s *Server) handleMessage(stream ChatService_StreamMessagesServer, in *Mess
 	switch msg := in.MessageType.(type) {
 	case *MessageStream_Message:
 		// Handle incoming chat message
-		log.Printf("Received message from player %d in group %d", msg.Message.Player.Id, msg.Message.Group.Id)
-		s.broadcastMessageToGroup(msg.Message)
+		playerID := msg.Message.Player.Id
+		groupID := msg.Message.Group.Id
+		content := msg.Message.Content
+		log.Printf("Group %d | Player %d: %s", groupID, playerID, content)
+
+		if playerID == 0 || groupID == 0 {
+			return errors.New("invalid player or group ID in chat message")
+		}
+
+		err := s.Producer.ProduceMessage(
+			strconv.FormatUint(groupID, 10),
+			strconv.FormatUint(playerID, 10),
+			content,
+		)
+		if err != nil {
+			return status.Errorf(codes.Internal, "error producing kafka message")
+		}
 		return nil
 
 	case *MessageStream_StreamRequest:
 		playerId := msg.StreamRequest.Player.Id
 		log.Printf("Received stream request from player %d", playerId)
+
 		// Handle stream request, store stream for later use
 		s.streams.Store(playerId, stream)
 		return nil
@@ -116,36 +121,36 @@ func (s *Server) handleMessage(stream ChatService_StreamMessagesServer, in *Mess
 	}
 }
 
-// broadcastMessageToGroup sends a given message to all subscribed players of a group.
-func (s *Server) broadcastMessageToGroup(message *Message) {
-	groupID := message.Group.Id
-	players, ok := s.groupSubscriptions.Load(groupID)
-	if !ok {
-		log.Printf("No players subscribed to group %d", groupID)
-		return
-	}
+// // broadcastMessageToGroup sends a given message to all subscribed players of a group.
+// func (s *Server) broadcastMessageToGroup(message *Message) {
+// 	groupID := message.Group.Id
+// 	players, ok := s.groupSubscriptions.Load(groupID)
+// 	if !ok {
+// 		log.Printf("No players subscribed to group %d", groupID)
+// 		return
+// 	}
 
-	subscribedPlayers, ok := players.([]uint64)
-	if !ok {
-		log.Printf("Invalid type for group subscribers")
-		return
-	}
+// 	subscribedPlayers, ok := players.([]uint64)
+// 	if !ok {
+// 		log.Printf("Invalid type for group subscribers")
+// 		return
+// 	}
 
-	for _, playerID := range subscribedPlayers {
-		stream, ok := s.streams.Load(playerID)
-		if !ok {
-			log.Printf("Stream for player %d not found", playerID)
-			continue
-		}
+// 	for _, playerID := range subscribedPlayers {
+// 		stream, ok := s.streams.Load(playerID)
+// 		if !ok {
+// 			log.Printf("Stream for player %d not found", playerID)
+// 			continue
+// 		}
 
-		playerStream, ok := stream.(ChatService_StreamMessagesServer)
-		if !ok {
-			log.Printf("Invalid stream type for player %d", playerID)
-			continue
-		}
+// 		playerStream, ok := stream.(ChatService_StreamMessagesServer)
+// 		if !ok {
+// 			log.Printf("Invalid stream type for player %d", playerID)
+// 			continue
+// 		}
 
-		if err := playerStream.Send(&MessageStream{MessageType: &MessageStream_Message{Message: message}}); err != nil {
-			log.Printf("Error sending message to player %d: %v", playerID, err)
-		}
-	}
-}
+// 		if err := playerStream.Send(&MessageStream{MessageType: &MessageStream_Message{Message: message}}); err != nil {
+// 			log.Printf("Error sending message to player %d: %v", playerID, err)
+// 		}
+// 	}
+// }

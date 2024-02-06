@@ -20,14 +20,16 @@ var serveCmd = &cobra.Command{
 	Short: "Inicia o servidor gRPC",
 	Long:  `Inicia o servidor gRPC que lida com mensagens.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		producer, err := kafka.NewProducer("localhost:9092")
+		kp, err := kafka.NewProducer("kafka:19092")
 		if err != nil {
 			log.Fatalf("Erro ao iniciar o produtor do kafka")
 		}
 		log.Printf("Produtor do kafka iniciado na porta :9092")
 
 		grpcServer := grpc.NewServer()
-		chat.RegisterChatServiceServer(grpcServer, &chat.Server{})
+		chat.RegisterChatServiceServer(grpcServer, &chat.Server{
+			Producer: kp,
+		})
 
 		// Register reflection service on gRPC server.
 		reflection.Register(grpcServer)
